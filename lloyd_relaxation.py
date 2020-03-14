@@ -1,19 +1,17 @@
 import numpy as np
 import cv2
-import time
-
 
 class lloyd_relaxation():
-
-    def __init__(self, image, N=1000, threshold=1e-3, maxiter=15, grad=False):
+    def __init__(self, image, N=1000, threshold=1e-3, maxiter=15, grad=False, dots=False):
         self.N = N
         self.threshold = threshold
         self.maxiter = maxiter
         self.grad = grad
         self.img = image
+        self.dots = dots
+        self.last_run_info = ()
 
-         
-    def run(self):
+    def run_all(self):
         img = self.img
         N = self.N
         grad = self.grad
@@ -24,9 +22,28 @@ class lloyd_relaxation():
         print("Correcting edges...")
         facet_area, facet_center, facet_contours = self.correct_edges(img, facet_area, facet_center, facet_contours)
 
+        self.last_run_info = (facet_area, facet_center, facet_contours, region_ids)
+
         print("Generating stipples...")
-        canvas_comb = self.draw_stipples_all(img, facet_area, facet_center, facet_contours, region_ids, grad=grad)
+        canvas_comb = self.draw_stipples_all(img, facet_area, facet_center, facet_contours, region_ids)
+
+        print("done")
+
         return (canvas_comb*255).astype(np.uint8)
+
+    def run_style(self):
+        img = self.img
+        N = self.N
+        grad = self.grad
+
+        facet_area, facet_center, facet_contours, region_ids = self.last_run_info
+
+        print("Generating stipples...")
+        canvas_comb = self.draw_stipples_all(img, facet_area, facet_center, facet_contours, region_ids)
+
+        print("done")
+        return (canvas_comb*255).astype(np.uint8)
+
     def init_stipples(self, N, x_max, y_max):
         rX = np.random.randint(0, x_max, size=N).astype(dtype=np.float32)
         rY = np.random.randint(0, y_max, size=N).astype(dtype=np.float32)
@@ -266,17 +283,22 @@ class lloyd_relaxation():
 
         return mag_sobel.astype(dtype=np.float32), ang_sobel.astype(dtype=np.float32)
 
-    def draw_stipples_all(self, img, f_area, f_center, f_contours, region_ids, grad=False):
+    def draw_stipples_all(self, img, f_area, f_center, f_contours, region_ids):
         # Create a copy of the image in grayscale
         assert( np.ndim(img) == 3 )
-        
+
+        img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
         img_canvas = np.zeros(img.shape, dtype=np.float32)
+        if self.dots:
+            img_canvas += 1
 
         rect = (0, 0, img.shape[1], img.shape[0])
         # Compute the maximum radius for each facet
         max_radius = np.sqrt(f_area / np.pi)
 
-        grad_mag, grad_ang = self.image_gradient(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY))
+        if self.grad:
+            grad_mag, grad_ang = self.image_gradient(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY))
 
         for i, z in enumerate(zip(f_area, f_center, f_contours, max_radius)):
             f_a, f_c, f_ctr, R = z
@@ -290,20 +312,28 @@ class lloyd_relaxation():
             ptColor = tuple(img[int(f_c[1]), int(f_c[0]), :].astype(np.double))
             stipple_center = tuple(np.array([f_c[0], f_c[1]], dtype=np.float32))
 
+            # Dots are proportional to the intensity / area of the region
+            if self.dots:
+                intensity_ratio = np.sum(1 - img_gray[region_ids == i]) / f_a
+                ptColor = (0, 0, 0)
+                R = np.max([R*intensity_ratio, 2]) / 0.8
+
             maxAng = 0
             axesLength = np.array([R * 0.8, R * 0.8], dtype=np.uint8) 
-            if grad:
+            
+            if self.grad:
                 mag_rvals = grad_mag[region_ids == i]
                 ang_rvals = grad_ang[region_ids == i]
                 
-                maxIdx = np.argmax(mag_rvals)
+                if mag_rvals.size != 0:
+                    maxIdx = np.argmax(mag_rvals)
 
-                maxMag = mag_rvals[maxIdx]
-                maxAng = ang_rvals[maxIdx] * 360
+                    maxMag = mag_rvals[maxIdx]
+                    maxAng = ang_rvals[maxIdx] * 360
 
-                hAx = R * (1 + maxMag / 3) * 0.8
-                vAx = R * (1 - maxMag / 3) * 0.8
-                axesLength = np.array([hAx, vAx], dtype=np.uint8) 
+                    hAx = R * (1 + maxMag / 3) * 0.8
+                    vAx = R * (1 - maxMag / 3) * 0.8
+                    axesLength = np.array([hAx, vAx], dtype=np.uint8) 
 
             # Circular stipples
             # cv2.circle(img_canvas, stipple_center, int(R * 0.8), ptColor, -1, cv2.LINE_AA)
@@ -345,10 +375,9 @@ class lloyd_relaxation():
 
 
 if __name__ == "__main__":
-    path = "images/flowers.jpg"
+    path = "images/plant.jpg"
     img = cv2.imread(path, cv2.IMREAD_COLOR | cv2.IMREAD_IGNORE_ORIENTATION).astype(dtype=np.float32) / 255 # Convert to float
-    L = lloyd_relaxation(img, N=5000, grad=True)
-    img_out = L.run()
+    L = lloyd_relaxation(img, N=10000, dots=True)
+    img_out = L.run_all()
     cv2.imwrite("file%d.png" % L.N, img_out)
-        
 

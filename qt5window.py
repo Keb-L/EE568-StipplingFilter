@@ -8,14 +8,16 @@
 
 
 from PyQt5 import QtCore, QtGui, QtWidgets
-import lloyd_relaxation
+from lloyd_relaxation import lloyd_relaxation
+import cv2
+import numpy as np
 
 class Ui_MainWindow(object):
-    L = lloyd_relaxation([])
+    L = lloyd_relaxation(np.array([]))
 
     def setupUi(self, MainWindow):
         MainWindow.setObjectName("MainWindow")
-        MainWindow.resize(800, 502)
+        MainWindow.resize(800, 520)
         self.centralwidget = QtWidgets.QWidget(MainWindow)
         self.centralwidget.setObjectName("centralwidget")
         self.label = QtWidgets.QLabel(self.centralwidget)
@@ -55,7 +57,7 @@ class Ui_MainWindow(object):
         self.sldStipples = QtWidgets.QSlider(self.centralwidget)
         self.sldStipples.setGeometry(QtCore.QRect(340, 380, 261, 22))
         self.sldStipples.setMinimum(100)
-        self.sldStipples.setMaximum(100000)
+        self.sldStipples.setMaximum(20000)
         self.sldStipples.setSingleStep(1000)
         self.sldStipples.setPageStep(5000)
         self.sldStipples.setProperty("value", 1000)
@@ -66,12 +68,13 @@ class Ui_MainWindow(object):
         self.label_4.setGeometry(QtCore.QRect(270, 390, 71, 16))
         self.label_4.setObjectName("label_4")
         self.label_5 = QtWidgets.QLabel(self.centralwidget)
-        self.label_5.setGeometry(QtCore.QRect(650, 360, 47, 13))
+        self.label_5.setGeometry(QtCore.QRect(650, 360, 100, 13))
         self.label_5.setObjectName("label_5")
         self.spnIter = QtWidgets.QSpinBox(self.centralwidget)
         self.spnIter.setGeometry(QtCore.QRect(350, 420, 42, 22))
         self.spnIter.setMinimum(1)
         self.spnIter.setMaximum(25)
+        self.spnIter.setValue(10)
         self.spnIter.setStepType(QtWidgets.QAbstractSpinBox.AdaptiveDecimalStepType)
         self.spnIter.setObjectName("spnIter")
         self.label_6 = QtWidgets.QLabel(self.centralwidget)
@@ -80,9 +83,17 @@ class Ui_MainWindow(object):
         self.btnProcess = QtWidgets.QPushButton(self.centralwidget)
         self.btnProcess.setGeometry(QtCore.QRect(30, 400, 191, 41))
         font = QtGui.QFont()
-        font.setPointSize(18)
+        font.setPointSize(14)
         self.btnProcess.setFont(font)
         self.btnProcess.setObjectName("btnProcess")
+
+        self.btnProcessQuick = QtWidgets.QPushButton(self.centralwidget)
+        self.btnProcessQuick.setGeometry(QtCore.QRect(30, 450, 191, 41))
+        font = QtGui.QFont()
+        font.setPointSize(14)
+        self.btnProcessQuick.setFont(font)
+        self.btnProcessQuick.setObjectName("btnProcessQuick")
+
         self.label_7 = QtWidgets.QLabel(self.centralwidget)
         self.label_7.setGeometry(QtCore.QRect(610, 380, 41, 16))
         font = QtGui.QFont()
@@ -105,7 +116,8 @@ class Ui_MainWindow(object):
         # ---------------------------------------------------
         # when user click the button, we run self.myloadingimage
         self.pushButton.clicked.connect(self.myloadingimage)
-        self.btnProcess.clicked.connect(self.processimage)
+        self.btnProcess.clicked.connect(self.myimageprocess_all)
+        self.btnProcessQuick.clicked.connect(self.myimageprocess_post)
 
         # ---------------------------------------------------
         # when user change the value using the scroller bar, we run self.myimageprocess
@@ -124,16 +136,20 @@ class Ui_MainWindow(object):
         self.chkDots.setText(_translate("MainWindow", "Dots"))
         self.label_3.setText(_translate("MainWindow", "Parameters"))
         self.label_4.setText(_translate("MainWindow", "Stipple Count"))
-        self.label_5.setText(_translate("MainWindow", "Style"))
+        self.label_5.setText(_translate("MainWindow", "Style (Post-Process)"))
         self.label_6.setText(_translate("MainWindow", "Max Iterations"))
         self.btnProcess.setText(_translate("MainWindow", "Process Image"))
+        self.btnProcessQuick.setText(_translate("MainWindow", "Post-Process Only"))
         self.label_7.setText(_translate("MainWindow", str(self.sldStipples.value())))
 
     def updateState(self):
-        self.L.N = self.sldStipples.value()
-        self.L.grad = self.chkGradient.isChecked()
-        self.L.dots = self.chkDots.isChecked()
-        self.L.maxiter = self.spnIter.value()
+        _translate = QtCore.QCoreApplication.translate
+        self.N = self.sldStipples.value()
+        self.grad = self.chkGradient.isChecked()
+        self.dots = self.chkDots.isChecked()
+        self.maxiter = self.spnIter.value()
+
+        self.label_7.setText(_translate("MainWindow", str(self.N)))
 
   # ---------------------------------------------------
     # implmentation for converting image representation to Qt
@@ -148,24 +164,39 @@ class Ui_MainWindow(object):
     # implmentation for loading and displaying the image.
     def myloadingimage(self):
         fullpath, file_ext = QtWidgets.QFileDialog.getOpenFileName(self.centralwidget, 'Caption: Select an Image', '/home/kevin', '*.bmp *.jpg *.png')
-        self.img = cv2.imread(fullpath)
-        qt_img =  self.myCV2Qt(self.img)
+        self.fullpath = fullpath
+        self.img_uint8 = cv2.imread(fullpath, cv2.IMREAD_COLOR | cv2.IMREAD_IGNORE_ORIENTATION)
+        self.updateState()
+
+        qt_img =  self.myCV2Qt(cv2.cvtColor(self.img_uint8, cv2.COLOR_BGR2RGB))
         qt_img = qt_img.scaled(self.label.width(),self.label.height())
         self.label.setPixmap(qt_img)
 
     # ---------------------------------------------------
     # implmentation for your image processing
-    def myimageprocess(self):
-        value = self.horizontalScrollBar.value()
-        # [0,100]
-        value = float(value)/100
-        self.img = self.img.astype('double')
-        result = self.img*value
-        result = np.clip(result,0,255)
-        result = result.astype('uint8')
+    def myimageprocess_all(self):
+
+        img = cv2.imread(self.fullpath, cv2.IMREAD_COLOR | cv2.IMREAD_IGNORE_ORIENTATION).astype(dtype=np.float32) / 255 # Convert to float
+        self.L = lloyd_relaxation(img, N=self.N, maxiter=self.maxiter, grad=self.grad, dots=self.dots)
+        img_out = self.L.run_all()
+
+        result = cv2.cvtColor(img_out, cv2.COLOR_BGR2RGB)
+        
         qt_img =  self.myCV2Qt(result)
         qt_img = qt_img.scaled(self.label_2.width(),self.label_2.height())
         self.label_2.setPixmap(qt_img) 
+
+
+    def myimageprocess_post(self):
+        self.L.grad, self.L.dots = (self.grad, self.dots)
+        img_out = self.L.run_style()
+        result = cv2.cvtColor(img_out, cv2.COLOR_BGR2RGB)
+
+        qt_img =  self.myCV2Qt(result)
+        qt_img = qt_img.scaled(self.label_2.width(),self.label_2.height())
+        self.label_2.setPixmap(qt_img) 
+
+
 
 if __name__ == "__main__":
     import sys
